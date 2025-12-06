@@ -1,0 +1,70 @@
+Dependencies
+
+Ignore node_modules directory in all subfolders
+
+**/node_modules
+
+Build/Distribution folders
+
+Vite build output
+
+/FrontEnd/dist
+
+Common Node.js temporary build files (if any)
+
+/BackEnd/build
+/BackEnd/dist
+
+Environment Variables
+
+Ignore the environment configuration file which should not be committed
+
+.env
+/BackEnd/.env
+/FrontEnd/.env
+
+Logs and npm debug files
+
+npm-debug.log
+yarn-error.log
+test-output.xml
+*.log
+
+Operating System files
+
+.DS_Store
+Thumbs.db
+
+Editor/IDE specific files
+
+VSCode
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+JetBrains IDEs (IntelliJ, WebStorm, etc.)
+
+.idea/
+
+Lock files (Optional: keep package-lock.json/yarn.lock, but ignore temporary ones)
+
+We usually keep package-lock.json and yarn.lock for deterministic builds,
+
+but ignore if other lock files are generated unexpectedly.
+
+/package-lock.json
+/FrontEnd/package-lock.json
+
+If you use Yarn/pnpm in the future
+
+yarn.lock
+pnpm-lock.yaml
+
+Backup/Temp files
+
+*~
+*.bak
+*.swp

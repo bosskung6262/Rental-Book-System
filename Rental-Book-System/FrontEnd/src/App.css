@@ -1,0 +1,35 @@
+html {
+  height: 100%;
+  overflow-y: scroll; /* Ensure the html element is the main scroll container */
+}
+
+body {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+main {
+  flex-grow: 1;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade {
+  animation: fade 0.3s ease-in-out;
+}
