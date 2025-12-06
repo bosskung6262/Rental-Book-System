@@ -1,5 +1,5 @@
 // FrontEnd/src/services/api.js
-import axios from '../api/axios'
+import axios from '../api/axios';
 
 const api = {
   // ============================================
@@ -86,19 +86,33 @@ const api = {
   // 📖 LOANS (ยืม-คืนหนังสือ)
   // ============================================
   
-  // 🔥 แก้ไขตรงนี้: ต้องส่งไปที่ /loans/borrow
+  // 🔥 แก้ไขตรงนี้: เปลี่ยนจาก /loans เป็น /loans/borrow
   borrowBook: async (bookId, hours = 168) => {
-    const { data } = await axios.post('/loans/borrow', { 
-      book_id: bookId, 
-      hours: parseFloat(hours) 
-    });
-    return data;
+    try {
+      console.log('📤 [API] Sending borrow request:', { bookId, hours });
+      const { data } = await axios.post('/loans/borrow', { 
+        book_id: bookId, 
+        hours: parseFloat(hours) 
+      });
+      console.log('✅ [API] Borrow response:', data);
+      return data;
+    } catch (error) {
+      console.error('❌ [API] Borrow error:', error.response || error);
+      throw error;
+    }
   },
 
-  // 🔥 แก้ไขตรงนี้: ต้องส่งไปที่ /loans/return
+  // 🔥 แก้ไขตรงนี้: เปลี่ยนจาก /loans เป็น /loans/return
   returnBook: async (bookId) => {
-    const { data } = await axios.post('/loans/return', { book_id: bookId });
-    return data;
+    try {
+      console.log('📤 [API] Sending return request:', { bookId });
+      const { data } = await axios.post('/loans/return', { book_id: bookId });
+      console.log('✅ [API] Return response:', data);
+      return data;
+    } catch (error) {
+      console.error('❌ [API] Return error:', error.response || error);
+      throw error;
+    }
   },
 
   getBorrowedBooks: async () => {
@@ -115,11 +129,18 @@ const api = {
   // 🎫 RESERVATIONS (การจอง)
   // ============================================
   createReservation: async (bookId, preferredHours = 168) => {
-    const { data } = await axios.post('/reservations', {
-      book_id: bookId,
-      preferred_hours: parseFloat(preferredHours),
-    });
-    return data;
+    try {
+      console.log('📤 [API] Sending reservation request:', { bookId, preferredHours });
+      const { data } = await axios.post('/reservations', {
+        book_id: bookId,
+        preferred_hours: parseFloat(preferredHours),
+      });
+      console.log('✅ [API] Reservation response:', data);
+      return data;
+    } catch (error) {
+      console.error('❌ [API] Reservation error:', error.response || error);
+      throw error;
+    }
   },
 
   getMyReservations: async () => {
@@ -176,7 +197,7 @@ const api = {
   },
 
   // ============================================
-  // ❤️ FAVORITES (ถ้ามี)
+  // ❤️ FAVORITES
   // ============================================
   getFavorites: async () => {
     try {

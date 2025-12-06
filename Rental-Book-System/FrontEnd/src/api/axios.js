@@ -1,7 +1,7 @@
 // FrontEnd/src/api/axios.js
 import axios from 'axios';
 
-// ✅ ตรวจสอบ BASE_URL ให้ถูกต้อง
+// 🔥 สำคัญ: ตรวจสอบ BASE_URL
 const instance = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8888/api',
   timeout: 30000,
@@ -17,21 +17,38 @@ instance.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // 🔥 Debug Log
+    console.log(`📡 [${config.method.toUpperCase()}] ${config.baseURL}${config.url}`, config.data);
+    
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => {
+    console.error('❌ Request Error:', error);
+    return Promise.reject(error);
+  }
 );
 
 // Response Interceptor: จัดการ Error
 instance.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log('✅ Response:', response.data);
+    return response;
+  },
   (error) => {
+    console.error('❌ Response Error:', {
+      url: error.config?.url,
+      method: error.config?.method,
+      status: error.response?.status,
+      data: error.response?.data,
+    });
+    
     if (error.response?.status === 401) {
-      // Token หมดอายุ
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
     }
+    
     return Promise.reject(error);
   }
 );
