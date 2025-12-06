@@ -1,0 +1,66 @@
+[
+  {
+    "id": 1,
+    "title": "The Duke and I",
+    "author": "Julia Quinn",
+    "cover_image": "/img/Duke&I.jpg",
+    "queue": 0,
+    "category": "Romance"
+  },
+  {
+    "id": 2,
+    "title": "Harry Potter and the Sorcerer's Stone",
+    "author": "J.K. Rowling",
+    "cover_image": "/img/harryStone.jpg",
+    "queue": 2,
+    "category": "Fantasy"
+  },
+  {
+    "id": 3,
+    "title": "The Little Prince",
+    "author": "Antoine de Saint-Exupéry",
+    "cover_image": "/img/Le-Petit-Prince.jpg",
+    "queue": 1,
+    "category": "Classics"
+  },
+  {
+    "id": 4,
+    "title": "Sapiens: A Brief History of Humankind",
+    "author": "Yuval Noah Harari",
+    "cover_image": "/img/Sapiens.jpg",
+    "queue": 5,
+    "category": "Non-Fiction"
+  },
+  {
+    "id": 5,
+    "title": "The Four Agreements",
+    "author": "Don Miguel Ruiz",
+    "cover_image": "/img/The-Four-Agreement.jpg",
+    "queue": 0,
+    "category": "Self-Help"
+  },
+  {
+    "id": 6,
+    "title": "The Notebook",
+    "author": "Nicholas Sparks",
+    "cover_image": "/img/theNotebook.jpg",
+    "queue": 3,
+    "category": "Romance"
+  },
+  {
+    "id": 7,
+    "title": "My Sweet Orange Tree",
+    "author": "José Mauro de Vasconcelos",
+    "cover_image": "/img/ต้นส้มแสนรัก.jpg",
+    "queue": 0,
+    "category": "Classics"
+  },
+  {
+    "id": 8,
+    "title": "Project Hail Mary",
+    "author": "Andy Weir",
+    "cover_image": "/img/harryStone.jpg",
+    "queue": 4,
+    "category": "Sci-Fi"
+  }
+]
