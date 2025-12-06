@@ -48,8 +48,8 @@ const getOrAddBookId = async (client, inputId) => {
       // หา ISBN & Cover
       isbn = edition?.isbn_13?.[0] || edition?.isbn_10?.[0] || `OL-${inputId}`;
       cover_image = "https://via.placeholder.com/150";
-      if (work.covers?.[0]) coverImage = `https://covers.openlibrary.org/b/id/${work.covers[0]}-L.jpg`;
-      else if (edition?.covers?.[0]) coverImage = `https://covers.openlibrary.org/b/id/${edition.covers[0]}-L.jpg`;
+      if (work.covers?.[0]) cover_image = `https://covers.openlibrary.org/b/id/${work.covers[0]}-L.jpg`;
+      else if (edition?.covers?.[0]) cover_image = `https://covers.openlibrary.org/b/id/${edition.covers[0]}-L.jpg`;
 
       // หา Category (Subject)
       category_name = work.subjects?.[0] || "General";
@@ -219,7 +219,7 @@ exports.borrowBook = async (req, res) => {
   }
 };
 
-// ✅ 2. Return Book
+// ✅ 2. Return Book (ปรับปรุงแล้ว - เรียกใช้ processNextInQueue)
 exports.returnBook = async (req, res) => {
   const { book_id } = req.body;
   const user_id = req.user.id || req.user.user_id;
@@ -231,7 +231,9 @@ exports.returnBook = async (req, res) => {
     await client.query("BEGIN");
     
     // แปลง ID ก่อนเสมอ (เผื่อส่ง Google ID มาคืน)
-    const realBookId = !isNaN(book_id) ? book_id : (await client.query("SELECT book_id FROM books WHERE google_id = $1", [book_id])).rows[0]?.book_id;
+    const realBookId = !isNaN(book_id) 
+      ? book_id 
+      : (await client.query("SELECT book_id FROM books WHERE google_id = $1", [book_id])).rows[0]?.book_id;
 
     if (!realBookId) {
        await client.query("ROLLBACK");
@@ -255,7 +257,7 @@ exports.returnBook = async (req, res) => {
       [loan.rows[0].loan_id]
     );
 
-    // ตรวจสอบ Queue
+    // 🔥 เรียกใช้ processNextInQueue เพื่อจัดการคิวหรือคืนหนังสือ
     const { processNextInQueue } = require("./reservationController");
     const queueResult = await processNextInQueue(client, realBookId);
 
@@ -326,43 +328,76 @@ exports.getOverdueLoans = async (req, res) => {
   }
 };
 
-// ✅ 5. Auto Return (Cron Job)
+// 🔥 5. Auto Return Expired Loans (ฟังก์ชันสำคัญ - ทำงานทุก 5 นาที)
 exports.autoReturnExpiredLoans = async (req, res) => {
   const client = await pool.connect();
   try {
+    console.log(`⏰ [AUTO-RETURN] Starting at ${new Date().toISOString()}`);
     await client.query("BEGIN");
     
+    // หาหนังสือที่หมดเวลายืมแล้ว
     const expiredLoans = await client.query(
-      `SELECT l.*, b.title FROM loans l 
+      `SELECT l.*, b.title, u.email, u.username 
+       FROM loans l 
        JOIN books b ON l.book_id = b.book_id 
+       JOIN users u ON l.user_id = u.user_id
        WHERE l.status = 'active' AND l.due_date < NOW()`
     );
     
     console.log(`📚 [AUTO-RETURN] Found ${expiredLoans.rows.length} expired loans`);
     
+    if (expiredLoans.rows.length === 0) {
+      await client.query("COMMIT");
+      console.log(`✅ [AUTO-RETURN] No expired loans`);
+      if (res) return res.json({ message: "No expired loans", count: 0 });
+      return;
+    }
+    
+    let processedCount = 0;
     for (const loan of expiredLoans.rows) {
-      await client.query(
-        "UPDATE loans SET status = 'returned', return_date = CURRENT_TIMESTAMP WHERE loan_id = $1",
-        [loan.loan_id]
-      );
-      
-      const { processNextInQueue } = require("./reservationController");
-      await processNextInQueue(client, loan.book_id);
-      
-      console.log(`✅ [AUTO-RETURN] Returned: ${loan.title} (loan_id: ${loan.loan_id})`);
+      try {
+        console.log(`📋 [AUTO-RETURN] Processing loan_id: ${loan.loan_id}, book: "${loan.title}", user: ${loan.username}`);
+        
+        // 1. คืนหนังสือ
+        await client.query(
+          "UPDATE loans SET status = 'returned', return_date = CURRENT_TIMESTAMP WHERE loan_id = $1",
+          [loan.loan_id]
+        );
+        console.log(`   ✓ Loan status updated to 'returned'`);
+        
+        // 2. ประมวลผลคิวถัดไป (หรือคืนหนังสือเข้าระบบ)
+        const { processNextInQueue } = require("./reservationController");
+        const queueResult = await processNextInQueue(client, loan.book_id);
+        
+        if (queueResult.hasQueue) {
+          if (queueResult.autoBorrowed) {
+            console.log(`   ✓ Auto-borrowed by next user: ${queueResult.nextUser}`);
+          } else {
+            console.log(`   ✓ Set ready for next user: ${queueResult.nextUser}`);
+          }
+        } else {
+          console.log(`   ✓ Book returned to 'available' (no queue)`);
+        }
+        
+        processedCount++;
+      } catch (err) {
+        console.error(`   ✗ Error processing loan ${loan.loan_id}:`, err.message);
+      }
     }
     
     await client.query("COMMIT");
+    console.log(`✅ [AUTO-RETURN] Successfully processed ${processedCount}/${expiredLoans.rows.length} expired loans`);
     
     if (res) {
       res.json({ 
         message: "Auto-return completed", 
-        count: expiredLoans.rows.length 
+        total: expiredLoans.rows.length,
+        processed: processedCount
       });
     }
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("❌ [AUTO-RETURN] Error:", err.message);
+    console.error("❌ [AUTO-RETURN] Fatal error:", err.message);
     if (res) res.status(500).json({ error: err.message });
   } finally {
     client.release();

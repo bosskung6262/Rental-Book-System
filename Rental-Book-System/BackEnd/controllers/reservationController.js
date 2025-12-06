@@ -123,6 +123,20 @@ const sendReservationEmail = async (userEmail, userName, bookTitle, status, addi
               <p style="color:#666">You can reserve it again if it's still available.</p>
             </div>
           </div>`
+      }),
+      book_returned: () => ({
+        subject: `📖 Book Returned: "${bookTitle}"`,
+        html: `
+          <div style="font-family:Arial,sans-serif;padding:20px;background:#f5f5f5">
+            <div style="background:white;padding:30px;border-radius:10px;max-width:600px;margin:0 auto">
+              <h2 style="color:#0770ad">📖 Book Available Again</h2>
+              <p>Hi ${userName},</p>
+              <p>The book <strong>"${bookTitle}"</strong> has been returned and is now available for reservation!</p>
+              <div style="background:#e3f2fd;border-left:4px solid #0770ad;padding:15px;margin:20px 0">
+                <p style="margin:0;color:#0770ad">✨ You can reserve it now before someone else does!</p>
+              </div>
+            </div>
+          </div>`
       })
     };
     
@@ -190,12 +204,11 @@ const autoBorrowForUser = async (client, reservation) => {
   }
 };
 
-// 🔥 แก้ไขฟังก์ชันนี้ให้ถูกต้อง
+// 🔥 ฟังก์ชันสำคัญ: ประมวลผลคิวถัดไป หรือคืนหนังสือเข้าระบบ
 const processNextInQueue = async (client, bookId) => {
   try {
     console.log(`🔄 [QUEUE] Processing book_id: ${bookId}`);
     
-    // หาคนต่อคิว
     const nextInQueue = await client.query(
       `SELECT r.*, u.email, u.username, b.title
        FROM reservations r
@@ -207,36 +220,32 @@ const processNextInQueue = async (client, bookId) => {
       [bookId]
     );
     
-    // ✅ กรณีไม่มีคนต่อคิว → คืนหนังสือกลับสู่ระบบ
+    // ✅ กรณีที่ 1: ไม่มีคนต่อคิว → คืนหนังสือกลับสู่ระบบทันที
     if (nextInQueue.rows.length === 0) {
       await client.query("UPDATE books SET status = 'available' WHERE book_id = $1", [bookId]);
-      console.log("✅ [QUEUE] No queue - Book returned to 'available' status");
+      console.log(`✅ [QUEUE] Book ${bookId} returned to 'available' - No queue`);
       return { hasQueue: false };
     }
     
-    // มีคนต่อคิว → ลอง Auto-Borrow
+    // ✅ กรณีที่ 2: มีคนต่อคิว → พยายาม Auto-Borrow ให้
     const reservation = nextInQueue.rows[0];
     const autoBorrowResult = await autoBorrowForUser(client, reservation);
     
     if (autoBorrowResult.success) {
-      console.log(`✅ [QUEUE] Auto-borrowed for: ${reservation.username}`);
+      console.log(`✅ [QUEUE] Book ${bookId} auto-borrowed by ${reservation.username}`);
       return { hasQueue: true, nextUser: reservation.username, autoBorrowed: true };
     }
     
-    // ⚠️ Auto-Borrow ล้มเหลว → ตั้งค่าเป็น 'ready' + เก็บหนังสือไว้ให้
+    // ✅ กรณีที่ 3: Auto-borrow ล้มเหลว (ครบโควต้า) → ตั้งค่า ready
     const expiresAt = new Date(Date.now() + READY_HOURS * 60 * 60 * 1000);
     await client.query(
-      `UPDATE reservations SET status = 'ready', ready_date = CURRENT_TIMESTAMP, expires_at = $1 
+      `UPDATE reservations 
+       SET status = 'ready', ready_date = CURRENT_TIMESTAMP, expires_at = $1 
        WHERE reservation_id = $2`,
       [expiresAt, reservation.reservation_id]
     );
     
-    // 🔥 แก้ไขตรงนี้: ไม่ต้องเปลี่ยนสถานะหนังสือ เพราะมันยังถูกจอง (ready)
-    // หนังสือจะเป็น 'available' ก็ต่อเมื่อ:
-    // 1. User ยืมสำเร็จ (จะเป็น 'borrowed')
-    // 2. Reservation หมดอายุและไม่มีคนต่อคิว (จะเป็น 'available')
-    
-    console.log(`⚠️ [QUEUE] Auto-borrow failed (${autoBorrowResult.reason}) - Set to 'ready', waiting for user action`);
+    console.log(`⚠️ [QUEUE] Book ${bookId} set ready for ${reservation.username} (expires: ${expiresAt.toISOString()})`);
     return { hasQueue: true, nextUser: reservation.username, autoBorrowed: false };
   } catch (err) {
     console.error("❌ [QUEUE] Error:", err.message);
@@ -244,15 +253,13 @@ const processNextInQueue = async (client, bookId) => {
   }
 };
 
-// ============================================
-// 📤 EXPORTED FUNCTIONS
-// ============================================
-
 exports.processNextInQueue = processNextInQueue;
 
+// 🔥 ฟังก์ชันหลัก: Process Expired Reservations (ทำงานทุก 5 นาที)
 exports.processExpiredReservations = async (req, res) => {
   const client = await pool.connect();
   try {
+    console.log(`⏰ [CRON-EXPIRED] Starting at ${new Date().toISOString()}`);
     await client.query("BEGIN");
     
     const expired = await client.query(
@@ -260,45 +267,61 @@ exports.processExpiredReservations = async (req, res) => {
        FROM reservations r
        JOIN users u ON r.user_id = u.user_id
        JOIN books b ON r.book_id = b.book_id
-       WHERE r.status = 'ready' AND r.expires_at < NOW()`
+       WHERE r.status = 'ready' 
+       AND r.expires_at IS NOT NULL 
+       AND r.expires_at < NOW()`
     );
     
     console.log(`⏰ [CRON-EXPIRED] Found ${expired.rows.length} expired reservations`);
     
     if (expired.rows.length === 0) {
       await client.query("COMMIT");
+      console.log(`✅ [CRON-EXPIRED] No expired reservations`);
       if (res) return res.json({ message: "No expired reservations", count: 0 });
       return;
     }
     
+    let processedCount = 0;
     for (const r of expired.rows) {
-      console.log(`📋 [EXPIRED] Processing: "${r.title}" for ${r.username}`);
-      
-      // 1. อัพเดทสถานะเป็น 'expired'
-      await client.query("UPDATE reservations SET status = 'expired' WHERE reservation_id = $1", [r.reservation_id]);
-      
-      // 2. ส่งอีเมลแจ้งเตือน
-      await sendReservationEmail(r.email, r.username, r.title, "expired");
-      
-      // 3. ประมวลผลคิวถัดไป (จะคืนหนังสือถ้าไม่มีคนรอ)
-      const queueResult = await processNextInQueue(client, r.book_id);
-      
-      const statusMsg = queueResult.hasQueue
-        ? queueResult.autoBorrowed
-          ? `auto-borrowed by ${queueResult.nextUser}`
-          : `ready for ${queueResult.nextUser}`
-        : "returned to 'available' - ready for new borrowers";
-      
-      console.log(`✅ [EXPIRED] Book "${r.title}" ${statusMsg}`);
+      try {
+        console.log(`📋 [EXPIRED] Processing reservation_id: ${r.reservation_id}, book: "${r.title}"`);
+        
+        await client.query(
+          "UPDATE reservations SET status = 'expired' WHERE reservation_id = $1", 
+          [r.reservation_id]
+        );
+        
+        await sendReservationEmail(r.email, r.username, r.title, "expired");
+        
+        const queueResult = await processNextInQueue(client, r.book_id);
+        
+        if (queueResult.hasQueue) {
+          console.log(queueResult.autoBorrowed 
+            ? `   ✓ Auto-borrowed by: ${queueResult.nextUser}` 
+            : `   ✓ Set ready for: ${queueResult.nextUser}`);
+        } else {
+          console.log(`   ✓ Book returned to 'available'`);
+        }
+        
+        processedCount++;
+      } catch (err) {
+        console.error(`   ✗ Error processing reservation ${r.reservation_id}:`, err.message);
+      }
     }
     
     await client.query("COMMIT");
-    console.log(`✅ [CRON-EXPIRED] Processed ${expired.rows.length} expired reservations successfully`);
+    console.log(`✅ [CRON-EXPIRED] Processed ${processedCount}/${expired.rows.length}`);
     
-    if (res) res.json({ message: "Expired reservations processed successfully", count: expired.rows.length });
+    if (res) {
+      res.json({ 
+        message: "Expired reservations processed", 
+        total: expired.rows.length,
+        processed: processedCount
+      });
+    }
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("❌ [CRON-EXPIRED] Error:", err.message);
+    console.error("❌ [CRON-EXPIRED] Fatal error:", err.message);
     if (res) res.status(500).json({ error: err.message });
   } finally {
     client.release();
@@ -440,7 +463,6 @@ exports.cancelReservation = async (req, res) => {
     if (wasReady) {
       const queueResult = await processNextInQueue(client, reservation.book_id);
       await client.query("COMMIT");
-      console.log(`✅ [CANCEL] Processed queue for book ${reservation.book_id}`);
       
       const queueStatus = queueResult.hasQueue
         ? queueResult.autoBorrowed
@@ -451,7 +473,6 @@ exports.cancelReservation = async (req, res) => {
       res.json({ message: "Reservation cancelled", queueStatus });
     } else {
       await client.query("COMMIT");
-      console.log(`✅ [CANCEL] Cancelled reservation ${reservation_id}`);
       res.json({ message: "Reservation cancelled" });
     }
   } catch (err) {

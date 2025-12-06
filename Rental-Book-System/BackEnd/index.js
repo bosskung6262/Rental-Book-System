@@ -1,34 +1,29 @@
+// BackEnd/index.js
 const express = require('express');
 const cors = require('cors');
 const cron = require('node-cron');
-const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 8888; // Render จะส่ง PORT มาให้เอง
+const PORT = process.env.PORT || 8888;
 
-// ✅ CORS Config: รวมเหลือชุดเดียวที่สมบูรณ์ที่สุด
+// CORS Config
 const allowedOrigins = [
-    'http://localhost:5173', // สำหรับ Local Dev
-    process.env.FRONTEND_URL // ค่าจาก .env (เช่น https://rental-book-system.vercel.app)
+    'http://localhost:5173',
+    process.env.FRONTEND_URL
 ];
 
 const corsOptions = {
     origin: function (origin, callback) {
-        // 1. อนุญาตถ้าไม่มี origin (เช่นยิงจาก Postman หรือ Server-to-Server ภายใน)
         if (!origin) return callback(null, true);
-
-        // 2. อนุญาตถ้าตรงกับในรายการ allowedOrigins หรือ ลงท้ายด้วย .vercel.app (รองรับ Preview URL)
-        // บรรทัดนี้จะช่วยแก้ปัญหา CORS Error ที่คุณเจอเมื่อกี้ครับ
         if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
             return callback(null, true);
         } else {
-            // ถ้าไม่เข้าเงื่อนไขเลย ให้แจ้ง Error
-            console.error(`❌ CORS Blocked: ${origin}`); // เพิ่ม Log ให้เห็นว่าใครโดนบล็อก
+            console.error(`❌ CORS Blocked: ${origin}`);
             return callback(new Error('CORS Policy: Not allowed by CORS'), false);
         }
     },
-    credentials: true // อนุญาตให้ส่ง Cookie/Header
+    credentials: true
 };
 
 app.use(cors(corsOptions));
@@ -42,35 +37,33 @@ app.use('/api/reservations', require('./routes/reservations'));
 app.use('/api/categories', require('./routes/categories'));
 app.use('/api/reviews', require('./routes/reviews'));
 
-app.get('/', (req, res) => res.send('📚 ShelfShare API on Render is Running...'));
+app.get('/', (req, res) => res.send('📚 ShelfShare API is Running...'));
 
-// ✅ Cron Job Management
+// 🔥 Cron Job: ทำงานทุก 5 นาที
 cron.schedule('*/5 * * * *', async () => {
-    console.log('⏰ [CRON] Starting maintenance tasks...');
-    
-    // บน Render ถ้าใช้ Free Tier, Server จะหลับ (Spin down) ถ้าไม่มี Traffic
-    // Cron นี้จะทำงานเฉพาะตอน Server ตื่นอยู่เท่านั้น
+    console.log(`⏰ [CRON] Starting maintenance at ${new Date().toLocaleString('th-TH')}`);
     
     try {
-        // ใช้ Loopback IP เพื่อความชัวร์ในการเรียกหาตัวเอง
-        const LOCAL_API = `http://127.0.0.1:${PORT}`; 
+        // Import Controllers
+        const loanController = require('./controllers/loanController');
+        const reservationController = require('./controllers/reservationController');
+        const bookController = require('./controllers/bookController');
 
-        // 1. Admin Login
-        const loginResponse = await axios.post(`${LOCAL_API}/api/users/login`, {
-            email: process.env.ADMIN_EMAIL,
-            password: process.env.ADMIN_PASSWORD
-        });
+        // Execute Tasks (Sequential เพื่อความปลอดภัย)
+        
+        // 1. Auto-Return หนังสือที่หมดเวลา
+        console.log('📖 [CRON] Task 1: Auto-Return Expired Loans...');
+        await loanController.autoReturnExpiredLoans(null, null);
+        
+        // 2. Process Expired Reservations
+        console.log('🎫 [CRON] Task 2: Process Expired Reservations...');
+        await reservationController.processExpiredReservations(null, null);
+        
+        // 3. Sync Book Statuses (ตรวจสอบสถานะหนังสือทั้งหมด)
+        console.log('🔄 [CRON] Task 3: Sync Book Statuses...');
+        await bookController.syncBookStatuses();
 
-        const token = loginResponse.data.token;
-        const config = { headers: { Authorization: `Bearer ${token}` } };
-
-        // 2. Execute Tasks (Parallel เพื่อความไว)
-        await Promise.all([
-            axios.post(`${LOCAL_API}/api/loans/auto-return`, {}, config)
-                .then(res => console.log('✅ Auto-return:', res.data.message || 'Success')),
-            axios.post(`${LOCAL_API}/api/reservations/process-expired`, {}, config)
-                .then(res => console.log('✅ Process expired:', res.data.message || 'Success'))
-        ]);
+        console.log('✅ [CRON] All maintenance tasks completed\n');
 
     } catch (error) {
         console.error('❌ [CRON] Failed:', error.message);
@@ -80,4 +73,8 @@ cron.schedule('*/5 * * * *', async () => {
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🔗 CORS Allowed:`, allowedOrigins);
+    console.log(`⏰ Cron Job: Running every 5 minutes`);
+    console.log(`   - Auto-Return Expired Loans`);
+    console.log(`   - Process Expired Reservations`);
+    console.log(`   - Sync Book Statuses\n`);
 });

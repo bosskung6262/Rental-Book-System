@@ -1,140 +1,202 @@
 // FrontEnd/src/services/api.js
-import axios from "../api/axios";
+import axios from '../api/axios'
 
 const api = {
-  // --- AUTH ---
+  // ============================================
+  // 🔐 USER & AUTH
+  // ============================================
   login: async (email, password) => {
-    const res = await axios.post("/users/login", { email, password });
-    return res.data;
+    const { data } = await axios.post('/users/login', { email, password });
+    if (data.token) {
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+    }
+    return data;
   },
 
   register: async (username, email, password) => {
-    const res = await axios.post("/users/register", { username, email, password });
-    return res.data;
+    const { data } = await axios.post('/users/register', { username, email, password });
+    return data;
   },
 
-  updateProfile: async (data) => {
-    const res = await axios.put("/users/profile", data);
-    return res.data;
+  logout: () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    window.location.href = '/login';
   },
 
-  changePassword: async (data) => {
-    const res = await axios.put("/users/change-password", data);
-    return res.data;
+  getCurrentUser: () => {
+    const user = localStorage.getItem('user');
+    return user ? JSON.parse(user) : null;
   },
 
-  // --- BOOKS ---
-  getBooks: async (query = null) => {
-    try {
-      const endpoint = query?.trim()
-        ? `/books/search?query=${encodeURIComponent(query.trim())}`
-        : `/books/search`;
-      const res = await axios.get(endpoint);
-      return res.data.map((book) => ({
-        ...book,
-        id: book.book_id || book.google_id || book.id,
-        category: book.category_name || book.category || "General",
-        cover_image: book.cover_image || "/img/book-placeholder.png",
-        rating: parseFloat(book.avg_rating || 0),
-        borrow_count: parseInt(book.borrow_count || 0),
-        queue_count: parseInt(book.queue_count || 0),
-        review_count: parseInt(book.review_count || 0),
-      }));
-    } catch (e) {
-      console.error("❌ getBooks error:", e);
-      return [];
-    }
+  updateProfile: async (userId, updates) => {
+    const { data } = await axios.put(`/users/${userId}`, updates);
+    localStorage.setItem('user', JSON.stringify(data));
+    return data;
+  },
+
+  changePassword: async (userId, currentPassword, newPassword) => {
+    const { data } = await axios.put(`/users/${userId}/password`, {
+      currentPassword,
+      newPassword,
+    });
+    return data;
+  },
+
+  requestPasswordReset: async (email) => {
+    const { data } = await axios.post('/users/forgot-password', { email });
+    return data;
+  },
+
+  resetPassword: async (token, newPassword) => {
+    const { data } = await axios.post('/users/reset-password', { token, newPassword });
+    return data;
+  },
+
+  // ============================================
+  // 📚 BOOKS
+  // ============================================
+  searchBooks: async (query = '') => {
+    const { data } = await axios.get(`/books/search?query=${encodeURIComponent(query)}`);
+    return data;
   },
 
   getBookById: async (id) => {
-    const res = await axios.get(`/books/${id}`);
-    return {
-      ...res.data,
-      id: res.data.book_id || res.data.google_id || res.data.id,
-      category: res.data.category_name || res.data.category || "General",
-      queue_count: parseInt(res.data.queue_count || 0),
-      borrow_count: parseInt(res.data.borrow_count || 0),
-      avg_rating: parseFloat(res.data.avg_rating || 0),
-    };
+    const { data } = await axios.get(`/books/${id}`);
+    return data;
   },
 
-  // --- LOANS ---
-  getBorrowedBooks: async () => {
-    try {
-      const res = await axios.get("/loans/my-loans");
-      return res.data;
-    } catch (e) {
-      console.error("❌ getBorrowedBooks error:", e);
-      return [];
-    }
+  getAllBooks: async () => {
+    const { data } = await axios.get('/books');
+    return data;
   },
 
+  addBook: async (bookData) => {
+    const { data } = await axios.post('/books', bookData);
+    return data;
+  },
+
+  getSuggestions: async (query = '') => {
+    const { data } = await axios.get(`/books/suggestions?query=${encodeURIComponent(query)}`);
+    return data;
+  },
+
+  // ============================================
+  // 📖 LOANS (ยืม-คืนหนังสือ)
+  // ============================================
+  
+  // 🔥 แก้ไขตรงนี้: ต้องส่งไปที่ /loans/borrow
   borrowBook: async (bookId, hours = 168) => {
-    const res = await axios.post("/loans", { book_id: bookId, hours });
-    return res.data;
-  },
-
-  returnBook: async (bookId) => {
-    const res = await axios.post("/loans/return", { book_id: bookId });
-    return res.data;
-  },
-
-  // --- RESERVATIONS ---
-  createReservation: async (bookId, preferredHours = 168) => {
-    const res = await axios.post("/reservations", {
-      book_id: bookId,
-      preferred_hours: preferredHours,
+    const { data } = await axios.post('/loans/borrow', { 
+      book_id: bookId, 
+      hours: parseFloat(hours) 
     });
-    return res.data;
+    return data;
+  },
+
+  // 🔥 แก้ไขตรงนี้: ต้องส่งไปที่ /loans/return
+  returnBook: async (bookId) => {
+    const { data } = await axios.post('/loans/return', { book_id: bookId });
+    return data;
+  },
+
+  getBorrowedBooks: async () => {
+    const { data } = await axios.get('/loans/my-loans');
+    return data;
+  },
+
+  getOverdueBooks: async () => {
+    const { data } = await axios.get('/loans/overdue');
+    return data;
+  },
+
+  // ============================================
+  // 🎫 RESERVATIONS (การจอง)
+  // ============================================
+  createReservation: async (bookId, preferredHours = 168) => {
+    const { data } = await axios.post('/reservations', {
+      book_id: bookId,
+      preferred_hours: parseFloat(preferredHours),
+    });
+    return data;
   },
 
   getMyReservations: async () => {
-    try {
-      const res = await axios.get("/reservations/my-reservations");
-      return res.data;
-    } catch (e) {
-      console.error("❌ getMyReservations error:", e);
-      return [];
-    }
+    const { data } = await axios.get('/reservations/my-reservations');
+    return data;
   },
 
-  cancelReservation: async (id) => {
-    const res = await axios.delete(`/reservations/${id}`);
-    return res.data;
+  cancelReservation: async (reservationId) => {
+    const { data } = await axios.delete(`/reservations/${reservationId}`);
+    return data;
   },
 
-  // --- REVIEWS ---
-  getBookReviews: async (id) => {
-    try {
-      const res = await axios.get(`/reviews/${id}`);
-      return res.data;
-    } catch (e) {
-      console.error("❌ getBookReviews error:", e);
-      return [];
-    }
+  // ============================================
+  // ⭐ REVIEWS
+  // ============================================
+  getReviews: async (bookId) => {
+    const { data } = await axios.get(`/reviews/book/${bookId}`);
+    return data;
   },
 
   addReview: async (bookId, rating, comment) => {
-    const res = await axios.post("/reviews", { book_id: bookId, rating, comment });
-    return res.data;
+    const { data } = await axios.post('/reviews', {
+      book_id: bookId,
+      rating: parseInt(rating),
+      comment,
+    });
+    return data;
   },
 
-  getSuggestions: async (query) => {
-    if (!query || query.trim().length < 2) return [];
+  updateReview: async (reviewId, rating, comment) => {
+    const { data } = await axios.put(`/reviews/${reviewId}`, {
+      rating: parseInt(rating),
+      comment,
+    });
+    return data;
+  },
+
+  deleteReview: async (reviewId) => {
+    const { data } = await axios.delete(`/reviews/${reviewId}`);
+    return data;
+  },
+
+  getMyReviews: async () => {
+    const { data } = await axios.get('/reviews/my-reviews');
+    return data;
+  },
+
+  // ============================================
+  // 📂 CATEGORIES
+  // ============================================
+  getCategories: async () => {
+    const { data } = await axios.get('/categories');
+    return data;
+  },
+
+  // ============================================
+  // ❤️ FAVORITES (ถ้ามี)
+  // ============================================
+  getFavorites: async () => {
     try {
-      const res = await axios.get(`/books/suggest?query=${encodeURIComponent(query.trim())}`);
-      return res.data;
-    } catch (e) {
-      console.error("❌ getSuggestions error:", e);
+      const { data } = await axios.get('/users/favorites');
+      return data;
+    } catch (err) {
+      console.error('Get favorites error:', err);
       return [];
     }
   },
 
-  // ✅ แก้ไข Newsletter Subscription
-  subscribeNewsletter: async (email) => {
-    const res = await axios.post("/users/subscribe-newsletter", { email });
-    return res.data;
-  }
+  addFavorite: async (bookId) => {
+    const { data } = await axios.post('/users/favorites', { book_id: bookId });
+    return data;
+  },
+
+  removeFavorite: async (bookId) => {
+    const { data } = await axios.delete(`/users/favorites/${bookId}`);
+    return data;
+  },
 };
 
 export default api;

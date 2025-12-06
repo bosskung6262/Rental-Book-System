@@ -1,25 +1,25 @@
+// BackEnd/routes/books.js
 const express = require('express');
 const router = express.Router();
 const bookController = require('../controllers/bookController');
 const authMiddleware = require('../middleware/authMiddleware');
 
-// --- โซนเส้นทางเฉพาะ (Specific Paths) ต้องมาก่อนเสมอ ---
-
-// 1. ค้นหาหนังสือจาก Google
+// 1. Search Google Books
 router.get('/search', bookController.searchGoogleBooks);
 
-// 2. แนะนำหนังสือ (✅ ใส่ตรงนี้ครับ ก่อนถึง /:id)
-router.get('/suggest', bookController.getSuggestions);
+// 2. Get Suggestions
+router.get('/suggestions', bookController.getSuggestions);
 
-// 3. ดึงหนังสือทั้งหมด
+// 3. Get All Books
 router.get('/', bookController.getAllBooks);
 
-// --- โซนเส้นทางแบบระบุ ID (Dynamic Paths) ต้องอยู่ท้ายๆ ---
-
-// 4. ดึงรายละเอียดหนังสือรายเล่ม (ถ้าเอา suggest ไปไว้หลังอันนี้ พังทันที!)
+// 4. Get Book By ID
 router.get('/:id', bookController.getBookById);
 
-// 5. เพิ่มหนังสือลง DB (ต้อง Login)
+// 5. Add Book
 router.post('/', authMiddleware, bookController.addBook);
+
+// 🔥 6. Sync Book Statuses (เรียกจาก Cron)
+router.post('/sync-statuses', bookController.syncBookStatuses);
 
 module.exports = router;
