@@ -75,7 +75,7 @@ const BookCard = ({ book, rank = null, showStats = false }) => {
              borrowCount > 0 ? 'bg-blue-600/80' : 'bg-gray-400/80' // ถ้า 0 ให้เป็นสีเทา
           }`}>
             <TrendingUp className="w-3 h-3" />
-            {borrowCount} Uses
+            {borrowCount} Borrowed
           </div>
 
         </div>
