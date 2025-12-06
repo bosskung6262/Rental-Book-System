@@ -7,25 +7,31 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 8888; // Render จะส่ง PORT มาให้เอง
 
-// ✅ CORS Config สำหรับ Vercel -> Render
+// ✅ CORS Config: รวมเหลือชุดเดียวที่สมบูรณ์ที่สุด
 const allowedOrigins = [
     'http://localhost:5173', // สำหรับ Local Dev
-    process.env.FRONTEND_URL // ใส่ URL ของ Vercel ที่นี่ (เช่น https://my-project.vercel.app)
+    process.env.FRONTEND_URL // ค่าจาก .env (เช่น https://rental-book-system.vercel.app)
 ];
 
-app.use(cors({
+const corsOptions = {
     origin: function (origin, callback) {
-        // อนุญาต Requests ที่ไม่มี origin (เช่น Postman หรือ Mobile App)
+        // 1. อนุญาตถ้าไม่มี origin (เช่นยิงจาก Postman หรือ Server-to-Server ภายใน)
         if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) === -1) {
-            // ถ้า Origin ไม่ตรงกับที่ระบุ
+
+        // 2. อนุญาตถ้าตรงกับในรายการ allowedOrigins หรือ ลงท้ายด้วย .vercel.app (รองรับ Preview URL)
+        // บรรทัดนี้จะช่วยแก้ปัญหา CORS Error ที่คุณเจอเมื่อกี้ครับ
+        if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
+            return callback(null, true);
+        } else {
+            // ถ้าไม่เข้าเงื่อนไขเลย ให้แจ้ง Error
+            console.error(`❌ CORS Blocked: ${origin}`); // เพิ่ม Log ให้เห็นว่าใครโดนบล็อก
             return callback(new Error('CORS Policy: Not allowed by CORS'), false);
         }
-        return callback(null, true);
     },
-    credentials: true
-}));
+    credentials: true // อนุญาตให้ส่ง Cookie/Header
+};
 
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Routes
@@ -46,7 +52,8 @@ cron.schedule('*/5 * * * *', async () => {
     // Cron นี้จะทำงานเฉพาะตอน Server ตื่นอยู่เท่านั้น
     
     try {
-        const LOCAL_API = `http://127.0.0.1:${PORT}`; // ใช้ Loopback IP ชัวร์กว่า localhost
+        // ใช้ Loopback IP เพื่อความชัวร์ในการเรียกหาตัวเอง
+        const LOCAL_API = `http://127.0.0.1:${PORT}`; 
 
         // 1. Admin Login
         const loginResponse = await axios.post(`${LOCAL_API}/api/users/login`, {
@@ -72,4 +79,5 @@ cron.schedule('*/5 * * * *', async () => {
 
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🔗 CORS Allowed:`, allowedOrigins);
 });
