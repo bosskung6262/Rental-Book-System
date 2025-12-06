@@ -10,8 +10,13 @@ const transporter = nodemailer.createTransport({
 
 const READY_HOURS = 48;
 
+// ============================================
+// 🔧 HELPER FUNCTIONS
+// ============================================
+
 const getOrAddBookId = async (client, inputId) => {
   if (!isNaN(inputId)) return parseInt(inputId, 10);
+  
   try {
     const API_KEY = process.env.GOOGLE_BOOKS_API_KEY || "";
     const { data } = await axios.get(`https://www.googleapis.com/books/v1/volumes/${inputId}?key=${API_KEY}`);
@@ -20,15 +25,24 @@ const getOrAddBookId = async (client, inputId) => {
     const info = data.volumeInfo;
     const isbn = info.industryIdentifiers?.[0]?.identifier || `GID-${inputId}`;
     
-    const existing = await client.query("SELECT book_id FROM books WHERE isbn = $1 OR google_id = $2", [isbn, inputId]);
+    // Check existing
+    const existing = await client.query(
+      "SELECT book_id FROM books WHERE isbn = $1 OR google_id = $2", 
+      [isbn, inputId]
+    );
     if (existing.rows.length > 0) return existing.rows[0].book_id;
     
+    // Get category
     let category_id = 1;
     if (info.categories?.length > 0) {
-      const catRes = await client.query("SELECT category_id FROM categories WHERE name ILIKE $1", [`%${info.categories[0]}%`]);
+      const catRes = await client.query(
+        "SELECT category_id FROM categories WHERE name ILIKE $1", 
+        [`%${info.categories[0]}%`]
+      );
       if (catRes.rows.length > 0) category_id = catRes.rows[0].category_id;
     }
     
+    // Insert new book
     const newBook = await client.query(
       `INSERT INTO books (title, author, isbn, published_year, category_id, cover_image, description, owner_id, status, google_id) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, 1, 'available', $8) RETURNING book_id`,
@@ -50,54 +64,72 @@ const getOrAddBookId = async (client, inputId) => {
   }
 };
 
+const formatDuration = (hours) => {
+  const h = parseFloat(hours);
+  if (h < 1) return `${Math.round(h * 60)} minutes`;
+  if (h < 24) return `${h} hour${h > 1 ? 's' : ''}`;
+  if (h < 168) return `${h / 24} day${h / 24 > 1 ? 's' : ''}`;
+  return `${h / 168} week${h / 168 > 1 ? 's' : ''}`;
+};
+
 const sendReservationEmail = async (userEmail, userName, bookTitle, status, additionalInfo = {}) => {
   try {
-    let subject, html;
-    if (status === "created") {
-      const { queuePosition, estimatedDate, preferredHours } = additionalInfo;
-      const hours = parseFloat(preferredHours);
-      const durationText = hours < 1 ? `${Math.round(hours * 60)} minutes` 
-        : hours < 24 ? `${hours} hour${hours > 1 ? 's' : ''}` 
-        : hours < 168 ? `${hours / 24} day${hours / 24 > 1 ? 's' : ''}` 
-        : `${hours / 168} week${hours / 168 > 1 ? 's' : ''}`;
-      
-      subject = `📚 Reservation Confirmed: "${bookTitle}"`;
-      html = `
-        <div style="font-family:Arial,sans-serif;padding:20px;background:#f5f5f5">
-          <div style="background:white;padding:30px;border-radius:10px;max-width:600px;margin:0 auto">
-            <h2 style="color:#0770ad">✅ Reservation Confirmed!</h2>
-            <p>Hi ${userName},</p>
-            <p>You're <strong>#${queuePosition}</strong> in queue for <strong>"${bookTitle}"</strong></p>
-            <div style="background:#e3f2fd;border-left:4px solid #0770ad;padding:15px;margin:20px 0">
-              <p style="margin:0;font-size:18px;color:#0770ad"><strong>🎯 Position: #${queuePosition}</strong></p>
-              ${estimatedDate ? `<p style="margin:10px 0 0;color:#666">📅 Est. available: ${new Date(estimatedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>` : ''}
-              <p style="margin:10px 0 0;color:#666">⏱️ Duration: ${durationText}</p>
+    const emailTemplates = {
+      created: () => {
+        const { queuePosition, estimatedDate, preferredHours } = additionalInfo;
+        return {
+          subject: `📚 Reservation Confirmed: "${bookTitle}"`,
+          html: `
+            <div style="font-family:Arial,sans-serif;padding:20px;background:#f5f5f5">
+              <div style="background:white;padding:30px;border-radius:10px;max-width:600px;margin:0 auto">
+                <h2 style="color:#0770ad">✅ Reservation Confirmed!</h2>
+                <p>Hi ${userName},</p>
+                <p>You're <strong>#${queuePosition}</strong> in queue for <strong>"${bookTitle}"</strong></p>
+                <div style="background:#e3f2fd;border-left:4px solid #0770ad;padding:15px;margin:20px 0">
+                  <p style="margin:0;font-size:18px;color:#0770ad"><strong>🎯 Position: #${queuePosition}</strong></p>
+                  ${estimatedDate ? `<p style="margin:10px 0 0;color:#666">📅 Est. available: ${new Date(estimatedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>` : ''}
+                  <p style="margin:10px 0 0;color:#666">⏱️ Duration: ${formatDuration(preferredHours)}</p>
+                </div>
+                <p style="color:#666">✨ <strong>Auto-Borrow:</strong> When it's your turn, we'll automatically borrow the book for you!</p>
+              </div>
+            </div>`
+        };
+      },
+      auto_borrowed: () => {
+        const { dueDate, borrowHours } = additionalInfo;
+        return {
+          subject: `🎉 Auto-Borrowed: "${bookTitle}"`,
+          html: `
+            <div style="font-family:Arial,sans-serif;padding:20px;background:#f5f5f5">
+              <div style="background:white;padding:30px;border-radius:10px;max-width:600px;margin:0 auto">
+                <h2 style="color:#0770ad">🎉 Great News, ${userName}!</h2>
+                <p>Your reserved book <strong>"${bookTitle}"</strong> has been automatically borrowed!</p>
+                <div style="background:#d4edda;border-left:4px solid #28a745;padding:15px;margin:20px 0">
+                  <p style="margin:0;color:#155724"><strong>⏱️ Duration:</strong> ${formatDuration(borrowHours)}</p>
+                  <p style="margin:10px 0 0;color:#155724"><strong>📖 Due:</strong> ${new Date(dueDate).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                </div>
+              </div>
+            </div>`
+        };
+      },
+      expired: () => ({
+        subject: `⏰ Reservation Expired: "${bookTitle}"`,
+        html: `
+          <div style="font-family:Arial,sans-serif;padding:20px;background:#f5f5f5">
+            <div style="background:white;padding:30px;border-radius:10px;max-width:600px;margin:0 auto">
+              <h2 style="color:#d33">⏰ Reservation Expired</h2>
+              <p>Hi ${userName},</p>
+              <p>Your reservation for <strong>"${bookTitle}"</strong> has expired because you didn't borrow it within the 48-hour window.</p>
+              <div style="background:#fff3cd;border-left:4px solid #ffc107;padding:15px;margin:20px 0">
+                <p style="margin:0;color:#856404">💡 <strong>Tip:</strong> Make sure to borrow books promptly when they become available!</p>
+              </div>
+              <p style="color:#666">You can reserve it again if it's still available.</p>
             </div>
-            <p style="color:#666">✨ <strong>Auto-Borrow:</strong> When it's your turn, we'll automatically borrow the book for you!</p>
-          </div>
-        </div>`;
-    } else if (status === "auto_borrowed") {
-      const { dueDate, borrowHours } = additionalInfo;
-      const hours = parseFloat(borrowHours);
-      const durationText = hours < 1 ? `${Math.round(hours * 60)} minutes` 
-        : hours < 24 ? `${hours} hour${hours > 1 ? 's' : ''}` 
-        : hours < 168 ? `${hours / 24} day${hours / 24 > 1 ? 's' : ''}` 
-        : `${hours / 168} week${hours / 168 > 1 ? 's' : ''}`;
-      
-      subject = `🎉 Auto-Borrowed: "${bookTitle}"`;
-      html = `
-        <div style="font-family:Arial,sans-serif;padding:20px;background:#f5f5f5">
-          <div style="background:white;padding:30px;border-radius:10px;max-width:600px;margin:0 auto">
-            <h2 style="color:#0770ad">🎉 Great News, ${userName}!</h2>
-            <p>Your reserved book <strong>"${bookTitle}"</strong> has been automatically borrowed!</p>
-            <div style="background:#d4edda;border-left:4px solid #28a745;padding:15px;margin:20px 0">
-              <p style="margin:0;color:#155724"><strong>⏱️ Duration:</strong> ${durationText}</p>
-              <p style="margin:10px 0 0;color:#155724"><strong>📖 Due:</strong> ${new Date(dueDate).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-            </div>
-          </div>
-        </div>`;
-    }
+          </div>`
+      })
+    };
     
+    const { subject, html } = emailTemplates[status]();
     await transporter.sendMail({
       from: `"ShelfShare Library" <${process.env.EMAIL_USER}>`,
       to: userEmail,
@@ -114,12 +146,14 @@ const autoBorrowForUser = async (client, reservation) => {
   try {
     console.log(`🤖 [AUTO-BORROW] Processing user ${reservation.user_id}, book ${reservation.book_id}`);
     
+    // Check existing loan
     const existingLoan = await client.query(
-      "SELECT * FROM loans WHERE book_id = $1 AND user_id = $2 AND status = 'active'",
+      "SELECT 1 FROM loans WHERE book_id = $1 AND user_id = $2 AND status = 'active'",
       [reservation.book_id, reservation.user_id]
     );
     if (existingLoan.rows.length > 0) return { success: false, reason: "already_borrowed" };
     
+    // Check borrow limit
     const [activeLoans, userInfo] = await Promise.all([
       client.query("SELECT COUNT(*) as count FROM loans WHERE user_id = $1 AND status = 'active'", [reservation.user_id]),
       client.query("SELECT borrow_limit, email, username FROM users WHERE user_id = $1", [reservation.user_id])
@@ -130,6 +164,7 @@ const autoBorrowForUser = async (client, reservation) => {
       return { success: false, reason: "limit_reached" };
     }
     
+    // Create loan
     const borrowHours = parseFloat(reservation.preferred_hours) || 168.0;
     const dueDate = new Date(Date.now() + borrowHours * 60 * 60 * 1000);
     
@@ -139,11 +174,13 @@ const autoBorrowForUser = async (client, reservation) => {
       [reservation.book_id, reservation.user_id, dueDate]
     );
     
+    // Update statuses
     await Promise.all([
       client.query("UPDATE reservations SET status = 'completed' WHERE reservation_id = $1", [reservation.reservation_id]),
       client.query("UPDATE books SET status = 'borrowed' WHERE book_id = $1", [reservation.book_id])
     ]);
     
+    // Send email
     const bookInfo = await client.query("SELECT title FROM books WHERE book_id = $1", [reservation.book_id]);
     await sendReservationEmail(
       userInfo.rows[0].email,
@@ -161,11 +198,11 @@ const autoBorrowForUser = async (client, reservation) => {
   }
 };
 
-// ✅ ประกาศฟังก์ชัน processNextInQueue
 const processNextInQueue = async (client, bookId) => {
   try {
     console.log(`🔄 [QUEUE] Processing book_id: ${bookId}`);
     
+    // Find next in queue
     const nextInQueue = await client.query(
       `SELECT r.*, u.email, u.username, b.title
        FROM reservations r
@@ -177,12 +214,14 @@ const processNextInQueue = async (client, bookId) => {
       [bookId]
     );
     
+    // No queue → return book to available
     if (nextInQueue.rows.length === 0) {
       await client.query("UPDATE books SET status = 'available' WHERE book_id = $1", [bookId]);
-      console.log("✅ [QUEUE] No queue - Book available");
+      console.log("✅ [QUEUE] No queue - Book returned to 'available'");
       return { hasQueue: false };
     }
     
+    // Try auto-borrow
     const reservation = nextInQueue.rows[0];
     const autoBorrowResult = await autoBorrowForUser(client, reservation);
     
@@ -191,14 +230,18 @@ const processNextInQueue = async (client, bookId) => {
       return { hasQueue: true, nextUser: reservation.username, autoBorrowed: true };
     }
     
+    // Auto-borrow failed → set to ready
     const expiresAt = new Date(Date.now() + READY_HOURS * 60 * 60 * 1000);
-    await client.query(
-      `UPDATE reservations SET status = 'ready', ready_date = CURRENT_TIMESTAMP, expires_at = $1 WHERE reservation_id = $2`,
-      [expiresAt, reservation.reservation_id]
-    );
-    await client.query("UPDATE books SET status = 'borrowed' WHERE book_id = $1", [bookId]);
+    await Promise.all([
+      client.query(
+        `UPDATE reservations SET status = 'ready', ready_date = CURRENT_TIMESTAMP, expires_at = $1 
+         WHERE reservation_id = $2`,
+        [expiresAt, reservation.reservation_id]
+      ),
+      client.query("UPDATE books SET status = 'borrowed' WHERE book_id = $1", [bookId])
+    ]);
     
-    console.log(`⚠️ [QUEUE] Auto-borrow failed (${autoBorrowResult.reason}) - Set to ready`);
+    console.log(`⚠️ [QUEUE] Auto-borrow failed (${autoBorrowResult.reason}) - Set to 'ready' with 48h expiry`);
     return { hasQueue: true, nextUser: reservation.username, autoBorrowed: false };
   } catch (err) {
     console.error("❌ [QUEUE] Error:", err.message);
@@ -206,13 +249,17 @@ const processNextInQueue = async (client, bookId) => {
   }
 };
 
-// ✅ Export ฟังก์ชัน processNextInQueue
+// ============================================
+// 📤 EXPORTED FUNCTIONS
+// ============================================
+
 exports.processNextInQueue = processNextInQueue;
 
 exports.processExpiredReservations = async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    
     const expired = await client.query(
       `SELECT r.*, u.email, u.username, b.title, b.book_id
        FROM reservations r
@@ -221,18 +268,38 @@ exports.processExpiredReservations = async (req, res) => {
        WHERE r.status = 'ready' AND r.expires_at < NOW()`
     );
     
-    console.log(`⏰ [CRON] Found ${expired.rows.length} expired reservations`);
+    console.log(`⏰ [CRON-EXPIRED] Found ${expired.rows.length} expired reservations`);
+    
+    if (expired.rows.length === 0) {
+      await client.query("COMMIT");
+      if (res) return res.json({ message: "No expired reservations", count: 0 });
+      return;
+    }
     
     for (const r of expired.rows) {
+      console.log(`📋 [EXPIRED] Processing: "${r.title}" for ${r.username}`);
+      
       await client.query("UPDATE reservations SET status = 'expired' WHERE reservation_id = $1", [r.reservation_id]);
-      await processNextInQueue(client, r.book_id);
+      await sendReservationEmail(r.email, r.username, r.title, "expired");
+      
+      const queueResult = await processNextInQueue(client, r.book_id);
+      
+      const statusMsg = queueResult.hasQueue
+        ? queueResult.autoBorrowed
+          ? `auto-borrowed by ${queueResult.nextUser}`
+          : `ready for ${queueResult.nextUser}`
+        : "returned to available";
+      
+      console.log(`✅ [EXPIRED] Book "${r.title}" ${statusMsg}`);
     }
     
     await client.query("COMMIT");
-    if (res) res.json({ message: "Processed", count: expired.rows.length });
+    console.log(`✅ [CRON-EXPIRED] Processed ${expired.rows.length} expired reservations`);
+    
+    if (res) res.json({ message: "Expired reservations processed", count: expired.rows.length });
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("❌ [CRON] Error:", err.message);
+    console.error("❌ [CRON-EXPIRED] Error:", err.message);
     if (res) res.status(500).json({ error: err.message });
   } finally {
     client.release();
@@ -255,8 +322,9 @@ exports.createReservation = async (req, res) => {
     const realBookId = await getOrAddBookId(client, book_id);
     await client.query("BEGIN");
     
+    // Check existing reservation
     const existing = await client.query(
-      "SELECT * FROM reservations WHERE book_id = $1 AND user_id = $2 AND status IN ('active', 'ready')",
+      "SELECT 1 FROM reservations WHERE book_id = $1 AND user_id = $2 AND status IN ('active', 'ready')",
       [realBookId, user_id]
     );
     if (existing.rows.length > 0) {
@@ -264,6 +332,7 @@ exports.createReservation = async (req, res) => {
       return res.status(400).json("Already reserved");
     }
     
+    // Check book availability
     const bookCheck = await client.query("SELECT status, title FROM books WHERE book_id = $1", [realBookId]);
     if (bookCheck.rows.length === 0) {
       await client.query("ROLLBACK");
@@ -274,25 +343,28 @@ exports.createReservation = async (req, res) => {
       return res.status(400).json("Book available - borrow directly");
     }
     
+    // Create reservation
     const newReservation = await client.query(
       `INSERT INTO reservations (book_id, user_id, reservation_date, status, preferred_hours) 
        VALUES ($1, $2, CURRENT_TIMESTAMP, 'active', $3) RETURNING *`,
       [realBookId, user_id, borrowHours]
     );
     
+    // Get queue position
     const queuePos = await client.query(
       `SELECT COUNT(*) as position FROM reservations 
        WHERE book_id = $1 AND status IN ('active', 'ready') AND reservation_date <= $2`,
       [realBookId, newReservation.rows[0].reservation_date]
     );
-    
     const position = parseInt(queuePos.rows[0].position);
     
+    // Get current loan info
     const currentLoan = await client.query(
       `SELECT due_date FROM loans WHERE book_id = $1 AND status = 'active' ORDER BY loan_date DESC LIMIT 1`,
       [realBookId]
     );
     
+    // Get user info and send email
     const userInfo = await client.query("SELECT email, username FROM users WHERE user_id = $1", [user_id]);
     await client.query("COMMIT");
     
@@ -302,11 +374,7 @@ exports.createReservation = async (req, res) => {
         userInfo.rows[0].username,
         bookCheck.rows[0].title,
         "created",
-        { 
-          queuePosition: position, 
-          estimatedDate: currentLoan.rows[0]?.due_date, 
-          preferredHours: borrowHours 
-        }
+        { queuePosition: position, estimatedDate: currentLoan.rows[0]?.due_date, preferredHours: borrowHours }
       );
     }
     
@@ -332,8 +400,12 @@ exports.getMyReservations = async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT r.*, b.title, b.cover_image, b.author, b.book_id,
-       (SELECT COUNT(*) FROM reservations r2 WHERE r2.book_id = r.book_id AND r2.status IN ('active', 'ready') AND r2.reservation_date < r.reservation_date) as queue_position,
-       (SELECT due_date FROM loans l WHERE l.book_id = r.book_id AND l.status = 'active' ORDER BY l.loan_date DESC LIMIT 1) as current_holder_due_date
+       (SELECT COUNT(*) FROM reservations r2 
+        WHERE r2.book_id = r.book_id AND r2.status IN ('active', 'ready') 
+        AND r2.reservation_date < r.reservation_date) + 1 as queue_position,
+       (SELECT due_date FROM loans l 
+        WHERE l.book_id = r.book_id AND l.status = 'active' 
+        ORDER BY l.loan_date DESC LIMIT 1) as current_holder_due_date
        FROM reservations r 
        JOIN books b ON r.book_id = b.book_id 
        WHERE r.user_id = $1 AND r.status IN ('active', 'ready')
@@ -354,8 +426,11 @@ exports.cancelReservation = async (req, res) => {
   
   try {
     await client.query("BEGIN");
+    
     const reservationCheck = await client.query(
-      `SELECT r.*, b.title FROM reservations r JOIN books b ON r.book_id = b.book_id WHERE r.reservation_id = $1 AND r.user_id = $2`,
+      `SELECT r.*, b.title FROM reservations r 
+       JOIN books b ON r.book_id = b.book_id 
+       WHERE r.reservation_id = $1 AND r.user_id = $2`,
       [reservation_id, user_id]
     );
     
@@ -373,12 +448,14 @@ exports.cancelReservation = async (req, res) => {
       const queueResult = await processNextInQueue(client, reservation.book_id);
       await client.query("COMMIT");
       console.log(`✅ [CANCEL] Processed queue for book ${reservation.book_id}`);
-      res.json({
-        message: "Reservation cancelled",
-        queueStatus: queueResult.hasQueue 
-          ? (queueResult.autoBorrowed ? `Auto-borrowed by ${queueResult.nextUser}` : `Ready for ${queueResult.nextUser}`)
-          : "Book now available"
-      });
+      
+      const queueStatus = queueResult.hasQueue
+        ? queueResult.autoBorrowed
+          ? `Auto-borrowed by ${queueResult.nextUser}`
+          : `Ready for ${queueResult.nextUser}`
+        : "Book now available";
+      
+      res.json({ message: "Reservation cancelled", queueStatus });
     } else {
       await client.query("COMMIT");
       console.log(`✅ [CANCEL] Cancelled reservation ${reservation_id}`);
