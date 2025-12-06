@@ -5,7 +5,6 @@ import { Search, Loader2, Book, Filter, X, RefreshCw } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import BookCard from '../components/BookCard';
 import apiService from '../services/api';
-import apiAxios from '../api/axios';
 
 const AllBooks = () => {
   const [library, setLibrary] = useState([]);
@@ -29,18 +28,20 @@ const AllBooks = () => {
       setLoading(true);
       try {
         const [cats, books] = await Promise.all([
-          apiAxios.get('/categories'),
-          apiService.getBooks()
+          apiService.getCategories(),
+          apiService.getAllBooks()
         ]);
-        setCategories(cats.data || []);
+        setCategories(cats || []);
         setLibrary(books || []);
+      } catch (err) {
+        console.error('Init error:', err);
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  // ✅ 2. Auto Suggestions (แก้ไขให้เร็วขึ้นและแม่นยำขึ้น)
+  // ✅ 2. Auto Suggestions (แก้ไข endpoint)
   useEffect(() => {
     if (query.trim().length < 2) {
       setSuggestions([]);
@@ -55,10 +56,8 @@ const AllBooks = () => {
     
     debounce.current = setTimeout(async () => {
       try {
-        const res = await apiAxios.get('/books/suggest', {
-          params: { query: query.trim() }
-        });
-        setSuggestions(res.data || []);
+        const res = await apiService.getSuggestions(query.trim());
+        setSuggestions(res || []);
         setShowSuggestions(true);
         setSelectedIndex(-1);
       } catch (err) {
@@ -74,7 +73,7 @@ const AllBooks = () => {
     };
   }, [query]);
 
-  // ✅ 3. Click Outside
+  // 3. Click Outside
   useEffect(() => {
     const handleClick = (e) => {
       if (inputRef.current && !inputRef.current.contains(e.target)) {
@@ -86,7 +85,7 @@ const AllBooks = () => {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  // ✅ 4. Keyboard Navigation
+  // 4. Keyboard Navigation
   const handleKeyDown = (e) => {
     if (!showSuggestions || suggestions.length === 0) {
       if (e.key === 'Enter') handleSearch(e);
@@ -121,7 +120,7 @@ const AllBooks = () => {
     }
   };
 
-  // ✅ 5. Handle Search
+  // 5. Handle Search
   const handleSearch = async (e) => {
     e?.preventDefault();
     if (!query.trim()) return;
@@ -131,10 +130,8 @@ const AllBooks = () => {
     setSelectedIndex(-1);
     
     try {
-      const res = await apiAxios.get('/books/search', { 
-        params: { query: query.trim() } 
-      });
-      setGoogle(res.data || []);
+      const res = await apiService.searchBooks(query.trim());
+      setGoogle(res || []);
     } catch (err) {
       console.error('Search error:', err);
       setGoogle([]);
@@ -143,7 +140,7 @@ const AllBooks = () => {
     }
   };
 
-  // ✅ 6. Handle Book Click
+  // 6. Handle Book Click
   const handleBookClick = (book) => {
     const targetId = book.book_id || book.id || book.google_id;
     setQuery('');
@@ -156,10 +153,12 @@ const AllBooks = () => {
   const handleRefresh = async () => {
     setLoading(true);
     try {
-      const data = await apiService.getBooks();
+      const data = await apiService.getAllBooks();
       setLibrary(data);
       setGoogle([]);
       setQuery('');
+    } catch (err) {
+      console.error('Refresh error:', err);
     } finally { 
       setLoading(false); 
     }
@@ -174,15 +173,15 @@ const AllBooks = () => {
   };
 
   // Filters
-  const allCats = ["All", ...new Set(library.map(b => b.category).filter(Boolean).sort())];
+  const allCats = ["All", ...new Set(library.map(b => b.category || b.category_name).filter(Boolean).sort())];
   const filtered = !category || category === 'All' 
     ? library 
     : library.filter(b => {
         const catObj = categories.find(c => String(c.category_id) === String(category));
-        return b.category === catObj?.name || b.category_name === catObj?.name;
+        return (b.category === catObj?.name || b.category_name === catObj?.name);
       });
 
-  // ✅ Google Card Component
+  // Google Card Component
   const GoogleCard = ({ book }) => (
     <div 
       onClick={() => handleBookClick(book)}
@@ -236,7 +235,7 @@ const AllBooks = () => {
             </button>
           </div>
 
-          {/* ✅ Search Bar with Auto Suggestions */}
+          {/* Search Bar with Auto Suggestions */}
           <div className="mb-8 flex flex-col md:flex-row gap-4 relative z-20">
             <div className="flex-1 relative" ref={inputRef}>
               <form onSubmit={handleSearch} className="relative">
@@ -244,7 +243,7 @@ const AllBooks = () => {
                 
                 <input 
                   type="text" 
-                  placeholder="พิมพ์ชื่อหนังสือหรือผู้แต่ง... (เช่น ความ, harry, steve)" 
+                  placeholder="Search books or authors..." 
                   value={query} 
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -254,7 +253,6 @@ const AllBooks = () => {
                   className="w-full pl-14 pr-28 py-4 bg-gray-50 border-2 border-transparent focus:border-[#0770ad]/30 focus:bg-white rounded-xl transition-all outline-none" 
                 />
                 
-                {/* ✅ Loading / Clear Button */}
                 {query && (
                   <button 
                     type="button" 
@@ -265,7 +263,6 @@ const AllBooks = () => {
                   </button>
                 )}
                 
-                {/* ✅ Search Button */}
                 <button 
                   type="submit" 
                   disabled={!query.trim() || loading}
@@ -279,13 +276,13 @@ const AllBooks = () => {
                 </button>
               </form>
               
-              {/* ✅ Auto Suggestions Dropdown */}
+              {/* Auto Suggestions Dropdown */}
               {showSuggestions && (
                 <div className="absolute w-full mt-2 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden z-50 max-h-96 overflow-y-auto">
                   {loadingSuggestions ? (
                     <div className="flex items-center justify-center py-8">
                       <Loader2 className="w-6 h-6 animate-spin text-[#0770ad]" />
-                      <span className="ml-3 text-gray-500">กำลังค้นหา...</span>
+                      <span className="ml-3 text-gray-500">Searching...</span>
                     </div>
                   ) : suggestions.length > 0 ? (
                     <>
@@ -315,22 +312,21 @@ const AllBooks = () => {
                         </button>
                       ))}
                       
-                      {/* ✅ View All Results Button */}
                       <button
                         onClick={handleSearch}
                         className="w-full p-4 text-center text-[#0770ad] font-bold hover:bg-blue-50 transition-colors border-t-2 border-gray-200"
                       >
-                        ดูผลลัพธ์ทั้งหมดสำหรับ "{query}"
+                        View all results for "{query}"
                       </button>
                     </>
                   ) : (
                     <div className="px-4 py-8 text-center">
-                      <p className="text-gray-500 mb-2">ไม่พบหนังสือที่ค้นหา</p>
+                      <p className="text-gray-500 mb-2">No books found</p>
                       <button
                         onClick={handleSearch}
                         className="text-[#0770ad] font-bold hover:underline text-sm"
                       >
-                        ค้นหาจาก Google Books
+                        Search Google Books
                       </button>
                     </div>
                   )}
@@ -338,7 +334,7 @@ const AllBooks = () => {
               )}
             </div>
             
-            {/* ✅ Category Filter */}
+            {/* Category Filter */}
             <div className="relative w-full md:w-64">
               <Filter className="absolute left-4 top-1/2 -translate-y-1/2 text-[#0770ad] w-5 h-5 pointer-events-none" />
               <select 
@@ -356,7 +352,7 @@ const AllBooks = () => {
             </div>
           </div>
 
-          {/* ✅ Google Search Results */}
+          {/* Google Search Results */}
           {google.length > 0 && (
             <div className="mb-12 pb-8 border-b border-gray-100">
               <div className="flex justify-between items-center mb-6">
@@ -379,7 +375,7 @@ const AllBooks = () => {
             </div>
           )}
 
-          {/* ✅ Library Collection */}
+          {/* Library Collection */}
           <div>
             <h2 className="text-xl font-bold flex items-center gap-2 mb-6 text-gray-800">
               <Book className="w-5 h-5 text-[#0770ad]" /> 

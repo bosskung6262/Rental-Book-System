@@ -13,7 +13,7 @@ import {
   Clock,
   Info,
 } from "lucide-react";
-import Swal from "sweetalert2"; // ✅ Import SweetAlert2
+import Swal from "sweetalert2";
 import Navbar from "../components/Navbar";
 import api from "../services/api";
 import BorrowBtn from "../components/BorrowBtn";
@@ -48,7 +48,6 @@ const BookDetail = () => {
   const [borrowUnit, setBorrowUnit] = useState("days");
   const [borrowAmount, setBorrowAmount] = useState(7);
 
-  // ตัวเลือกเวลา (รวม Minutes ที่คุณขอไว้)
   const durationOptions = {
     minutes: [5, 10, 15, 30, 45, 60],
     hours: [1, 2, 3, 6, 12, 24],
@@ -80,7 +79,10 @@ const BookDetail = () => {
 
   const refreshAllData = useCallback(async () => {
     try {
+      console.log('🔍 Fetching book with ID:', id);
       const bookData = await api.getBookById(id);
+      console.log('✅ Book data received:', bookData);
+      
       setBook(bookData);
 
       setStats({
@@ -95,7 +97,7 @@ const BookDetail = () => {
           const myReservations = await api.getMyReservations();
           if (Array.isArray(myReservations)) {
             const myReservation = myReservations.find(
-              (r) => String(r.book_id) === String(id) && r.status === "active"
+              (r) => String(r.book_id) === String(bookData.book_id || id) && r.status === "active"
             );
             if (myReservation) {
               setUserQueueStatus({
@@ -124,7 +126,7 @@ const BookDetail = () => {
       }
       return bookData;
     } catch (err) {
-      console.error(err);
+      console.error('❌ Error fetching book:', err);
       throw err;
     }
   }, [id, user]);
@@ -138,35 +140,39 @@ const BookDetail = () => {
         const bookData = await refreshAllData();
         if (!isMounted) return;
 
+        // 🔥 FIX: เปลี่ยนจาก getBookReviews เป็น getReviews
         try {
-          const reviewsData = await api.getBookReviews(id);
+          const bookId = bookData.book_id || id;
+          console.log('🔍 Fetching reviews for book:', bookId);
+          const reviewsData = await api.getReviews(bookId);
           setReviews(Array.isArray(reviewsData) ? reviewsData : []);
         } catch (e) {
+          console.warn('Reviews fetch failed:', e);
           setReviews([]);
         }
 
         if (bookData) {
           try {
-            const allBooks = await api.getBooks();
-            if (Array.isArray(allBooks)) {
-              const similar = allBooks.filter((b) => {
-                const bId = String(b.book_id || b.id || b.google_id);
-                const currentId = String(id);
-                if (bId === currentId) return false;
-                if (bookData.category_id && b.category_id)
-                  return String(b.category_id) === String(bookData.category_id);
-                if (bookData.category_name || bookData.category) {
-                  const catName = bookData.category_name || bookData.category;
-                  return b.category === catName || b.category_name === catName;
-                }
-                return false;
-              });
-              setSimilarBooks(similar.slice(0, 4));
+            // 🔥 FIX: ใช้ searchBooks แทน getBooks เพื่อค้นหาหนังสือที่คล้ายกัน
+            const categoryName = bookData.category_name || bookData.category || '';
+            if (categoryName) {
+              const allBooks = await api.searchBooks(categoryName);
+              if (Array.isArray(allBooks)) {
+                const similar = allBooks.filter((b) => {
+                  const bId = String(b.book_id || b.id || b.google_id);
+                  const currentId = String(bookData.book_id || id);
+                  return bId !== currentId;
+                });
+                setSimilarBooks(similar.slice(0, 4));
+              }
             }
-          } catch (e) {}
+          } catch (e) {
+            console.warn('Similar books fetch failed:', e);
+          }
         }
       } catch (err) {
-        if (isMounted) setError(err.response?.data || "Failed to load book");
+        console.error('❌ Init fetch error:', err);
+        if (isMounted) setError(err.response?.data || err.message || "Failed to load book");
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -177,7 +183,6 @@ const BookDetail = () => {
     };
   }, [id, refreshAllData]);
 
-  // ✅ 1. ใช้ SweetAlert แทน alert ในการ Submit Review
   const handleSubmitReview = async (e) => {
     e.preventDefault();
     if (!user) {
@@ -203,13 +208,15 @@ const BookDetail = () => {
 
     setSubmittingReview(true);
     try {
-      await api.addReview(id, newReview.rating, newReview.comment);
-      const updatedReviews = await api.getBookReviews(id);
+      const bookId = book.book_id || id;
+      await api.addReview(bookId, newReview.rating, newReview.comment);
+      
+      // 🔥 FIX: เปลี่ยนจาก getBookReviews เป็น getReviews
+      const updatedReviews = await api.getReviews(bookId);
       setReviews(Array.isArray(updatedReviews) ? updatedReviews : []);
       await refreshAllData();
       setNewReview({ rating: 5, comment: "" });
 
-      // ✅ Success Alert
       Swal.fire({
         icon: "success",
         title: "Review Added!",
@@ -218,7 +225,6 @@ const BookDetail = () => {
         showConfirmButton: false,
       });
     } catch (err) {
-      // ❌ Error Alert
       Swal.fire({
         icon: "error",
         title: "Oops...",
@@ -233,7 +239,6 @@ const BookDetail = () => {
     }
   };
 
-  // ✅ 2. ใช้ Toast Notification แทน alert ตอนกด Share
   const handleShare = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
@@ -259,20 +264,36 @@ const BookDetail = () => {
     }
   };
 
-  if (loading)
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center pt-24">
         <Navbar />
-        <Loader2 className="w-10 h-10 animate-spin text-[#0770ad]" />
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 animate-spin text-[#0770ad] mx-auto mb-4" />
+          <p className="text-gray-500">Loading book details...</p>
+        </div>
       </div>
     );
-  if (error || !book)
+  }
+
+  if (error || !book) {
     return (
       <div className="min-h-screen bg-gray-50 pt-24">
         <Navbar />
-        <div className="text-center text-red-500 font-bold">Book Not Found</div>
+        <div className="container mx-auto px-6 text-center py-20">
+          <BookIcon className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+          <h2 className="text-2xl font-bold text-gray-700 mb-2">Book Not Found</h2>
+          <p className="text-gray-500 mb-6">{error || "The book you're looking for doesn't exist."}</p>
+          <button
+            onClick={() => navigate(-1)}
+            className="px-6 py-3 bg-[#0770ad] text-white rounded-xl font-bold hover:bg-[#055a8c] transition"
+          >
+            Go Back
+          </button>
+        </div>
       </div>
     );
+  }
 
   const description = book.description
     ? book.description.replace(/<[^>]+>/g, "")
@@ -296,7 +317,7 @@ const BookDetail = () => {
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex flex-col lg:flex-row overflow-hidden mb-8">
           <div className="lg:w-1/3 bg-gradient-to-br from-gray-50 to-gray-100 p-8 flex justify-center items-center relative min-h-[400px]">
             <img
-              src={book.cover_image}
+              src={book.cover_image || "https://via.placeholder.com/300x450?text=No+Cover"}
               alt={book.title}
               className="h-64 lg:h-80 w-auto object-contain shadow-2xl rounded-lg transform hover:scale-105 transition-transform duration-300"
               onError={(e) =>
@@ -412,6 +433,7 @@ const BookDetail = () => {
                 </div>
               </div>
             )}
+
             {userQueueStatus?.isReserved && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6 flex items-start gap-3">
                 <Clock className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
@@ -432,7 +454,6 @@ const BookDetail = () => {
                   <Clock className="w-6 h-6 text-[#0770ad]" /> Select Duration
                 </label>
                 <div className="flex gap-2 mb-4 overflow-x-auto pb-2 scrollbar-hide">
-                  {/* ปุ่มเลือกหน่วยเวลา (รวม Minutes) */}
                   {["minutes", "hours", "days", "weeks"].map((unit) => (
                     <button
                       key={unit}
@@ -630,4 +651,5 @@ const BookDetail = () => {
     </div>
   );
 };
+
 export default BookDetail;

@@ -57,6 +57,12 @@ const api = {
   // ============================================
   // 📚 BOOKS
   // ============================================
+  getBooks: async (query = '') => {
+    const endpoint = query ? `/books/search?query=${encodeURIComponent(query)}` : '/books/search';
+    const { data } = await axios.get(endpoint);
+    return data;
+  },
+
   searchBooks: async (query = '') => {
     const { data } = await axios.get(`/books/search?query=${encodeURIComponent(query)}`);
     return data;
@@ -83,10 +89,8 @@ const api = {
   },
 
   // ============================================
-  // 📖 LOANS (ยืม-คืนหนังสือ)
+  // 📖 LOANS
   // ============================================
-  
-  // 🔥 แก้ไขตรงนี้: เปลี่ยนจาก /loans เป็น /loans/borrow
   borrowBook: async (bookId, hours = 168) => {
     try {
       console.log('📤 [API] Sending borrow request:', { bookId, hours });
@@ -102,7 +106,6 @@ const api = {
     }
   },
 
-  // 🔥 แก้ไขตรงนี้: เปลี่ยนจาก /loans เป็น /loans/return
   returnBook: async (bookId) => {
     try {
       console.log('📤 [API] Sending return request:', { bookId });
@@ -126,7 +129,7 @@ const api = {
   },
 
   // ============================================
-  // 🎫 RESERVATIONS (การจอง)
+  // 🎫 RESERVATIONS
   // ============================================
   createReservation: async (bookId, preferredHours = 168) => {
     try {
@@ -217,6 +220,19 @@ const api = {
   removeFavorite: async (bookId) => {
     const { data } = await axios.delete(`/users/favorites/${bookId}`);
     return data;
+  },
+
+  // ============================================
+  // 📧 NEWSLETTER (🔥 NEW)
+  // ============================================
+  subscribeNewsletter: async (email) => {
+    try {
+      const { data } = await axios.post('/users/subscribe-newsletter', { email });
+      return data;
+    } catch (error) {
+      console.error('Newsletter subscription error:', error);
+      throw error;
+    }
   },
 };
 
