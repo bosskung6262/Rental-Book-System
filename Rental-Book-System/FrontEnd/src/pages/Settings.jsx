@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+// ✅ เพิ่ม X เข้ามาใน import เพื่อแก้ปัญหาหน้าขาว
 import {
   User, Mail, Lock, Camera, Save, LogOut,
-  Eye, EyeOff, Loader2, Edit2
+  Eye, EyeOff, Loader2, Edit2, X
 } from "lucide-react";
 import { Toaster, toast } from 'react-hot-toast';
 import Swal from "sweetalert2";
@@ -11,6 +12,7 @@ import { useAuth } from "../hooks/useAuth";
 const Settings = () => {
   const [tab, setTab] = useState("profile");
   const [loading, setLoading] = useState(false);
+  // State นี้จะควบคุมการสลับระหว่างโหมดดูและโหมดแก้ไขในหน้าเดียว
   const [isEditing, setIsEditing] = useState(false);
   
   const { user, logout, updateProfile, changePassword } = useAuth();
@@ -44,6 +46,7 @@ const Settings = () => {
   // ✅ LOAD DATA
   useEffect(() => {
     if (user) {
+      // รองรับทั้ง snake_case (จาก DB) และ camelCase
       const initialData = {
         firstName: user.first_name || user.firstName || "",
         lastName: user.last_name || user.lastName || "",
@@ -69,6 +72,7 @@ const Settings = () => {
     setLoading(true);
 
     try {
+      // ส่งข้อมูลกลับไป Update
       await updateProfile({
         firstName: profileForm.firstName,
         lastName: profileForm.lastName,
@@ -79,7 +83,7 @@ const Settings = () => {
 
       toast.success("Profile updated successfully!");
       setOriginalData(profileForm);
-      setIsEditing(false);
+      setIsEditing(false); // ปิดโหมดแก้ไขเมื่อสำเร็จ
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data || "Failed to update profile");
@@ -254,6 +258,7 @@ const Settings = () => {
                 <h3 className="text-xl font-bold text-gray-800">Personal Information</h3>
                 {!isEditing && (
                     <button 
+                        type="button" // ✅ ใส่ type="button" กันเหนียวไม่ให้ submit
                         onClick={() => setIsEditing(true)}
                         className="flex items-center gap-2 text-[#0770ad] hover:bg-blue-50 px-4 py-2 rounded-lg transition font-semibold"
                     >
@@ -288,7 +293,7 @@ const Settings = () => {
                     icon={Mail}
                     type="email"
                     value={profileForm.email}
-                    readOnly={true}
+                    readOnly={true} // Email มักจะห้ามแก้
                     disabled={true} 
                   />
                   <Input
@@ -356,13 +361,14 @@ const Settings = () => {
                             disabled={loading}
                             className="w-full sm:w-auto px-6 py-3 rounded-xl bg-white border border-gray-300 text-gray-700 font-bold hover:bg-gray-50 transition flex items-center justify-center gap-2"
                         >
+                            {/* ✅ ตอนนี้ X render ได้แล้ว ไม่จอขาวแน่นอน */}
                             <X className="w-5 h-5" />
                             Cancel
                         </button>
                     </div>
                 )}
 
-                {/* Logout Zone (Always Visible) */}
+                {/* Logout Zone (Always Visible if not editing) */}
                 {!isEditing && (
                     <div className="flex flex-col sm:flex-row items-center gap-4 pt-8 border-t border-gray-100">
                         <button
